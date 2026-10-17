@@ -1,0 +1,16 @@
+[project]
+name = "retrain"
+version = "0.1.0"
+description = "When should a data scientist retrain? Drift and performance triggers compared by cost, on known-truth simulations and real grid-load forecasting"
+requires-python = ">=3.11"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

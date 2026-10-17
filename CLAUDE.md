@@ -3,7 +3,7 @@
 When should a data scientist retrain a model? Retraining triggers (schedule, input PSI/KS, prediction
 PSI, performance with delayed labels, oracle) compared by total cost = error + retrain cost, on synthetic
 streams with known drift and on EIA-930 day-ahead load forecasting. Also: refit vs full re-tune vs warm
-start. Backlog: Project Checklist #4 item 12 ("Drift Detection"); partner-gateway (#96) covered the
+start. Trello #104 https://trello.com/c/N2cwKk6P. Backlog: Project Checklist #4 item 12 ("Drift Detection"); partner-gateway (#96) covered the
 detection side (per-partner PSI) and found drift != harm; this project is the retraining decision.
 Started 2026-10-17. Plan: docs/PLAN.md. Open work: TODO.md.
 

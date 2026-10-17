@@ -73,9 +73,16 @@ def _sizes(s):
     return getattr(s, "train_batches", TRAIN_BATCHES), getattr(s, "val_batches", VAL_BATCHES)
 
 
+def _serve(s, b):
+    """Inputs as seen at prediction time (a stream may serve forecasts where it trains on actuals)."""
+    xs = getattr(s, "X_serve", None)
+    return s.X[b] if xs is None else xs[b]
+
+
 def _cols(s, b):
     dc = getattr(s, "drift_cols", None)
-    return s.X[b] if dc is None else s.X[b][:, dc]
+    x = _serve(s, b)
+    return x if dc is None else x[:, dc]
 
 
 def score(trigger, st, s, b, pred, mae_hist, label_delay, seed=0):
@@ -133,7 +140,7 @@ def run(s, trigger, thresholds, action="refit", label_delay=2, window=10, every=
     recent_psi = []
     tb, vb = _sizes(s)
     for b in range(tb, len(s.X)):
-        pred = st.model.predict(s.X[b])
+        pred = st.model.predict(_serve(s, b))
         mae_hist[b] = float(np.mean(np.abs(pred - s.y[b])))
         res.mae.append(mae_hist[b])
         labelled_upto = b - label_delay

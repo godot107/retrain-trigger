@@ -85,6 +85,10 @@ def _wx(ba):
     return run_ba(ba, WX_GRID, weather=True)
 
 
+def _wxfc(ba):
+    return run_ba(ba, WX_GRID, weather="forecast")
+
+
 def _cpw(ba):
     return run_ba(ba, CPW)
 
@@ -97,11 +101,12 @@ def main(argv=None):
     """No args: the first grid (overwrites). `--extra`: the extended grid, appended."""
     argv = sys.argv[1:] if argv is None else argv
     RES.mkdir(exist_ok=True)
-    if argv[:1] == ["--weather"]:     # separate results file
+    if argv[:1] in (["--weather"], ["--weather-forecast"]):     # separate results files
+        fn, out = (_wx, "real_runs_weather.json") if argv[0] == "--weather" else (_wxfc, "real_runs_weather_forecast.json")
         with ProcessPoolExecutor(max_workers=min(len(eia.BAS), max(1, (os.cpu_count() or 2) - 1))) as pool:
-            rows = [r for rs in pool.map(_wx, eia.BAS) for r in rs]
-        (RES / "real_runs_weather.json").write_text(json.dumps(rows))
-        print(len(rows), "weather runs")
+            rows = [r for rs in pool.map(fn, eia.BAS) for r in rs]
+        (RES / out).write_text(json.dumps(rows))
+        print(len(rows), "runs ->", out)
         return
     fn = {"--extra": _extra, "--seasonal": _seasonal, "--cpw": _cpw}.get(argv[0] if argv else "", run_ba)
     with ProcessPoolExecutor(max_workers=min(len(eia.BAS), max(1, (os.cpu_count() or 2) - 1))) as pool:

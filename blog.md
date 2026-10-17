@@ -10,8 +10,9 @@ different from the data the model learned from.
 
 I wanted to know whether that alarm rings at the right times. So I built a test bench where I control
 exactly when and how the world changes, compared a dozen retraining rules on cost, and then ran the same
-rules on seven years of real electricity-demand forecasting. The short version: **the alarm most teams
-use is watching the wrong thing**, and on real data it is mostly noise.
+rules on seven years of real electricity-demand forecasting. The short version: **the most common alarm,
+a per-column drift score, watches the wrong thing**, and on real data it was mostly noise. What worked
+better depended on the model, which was the most interesting finding.
 
 ## Two kinds of change
 
@@ -91,8 +92,8 @@ Three things stood out.
 Texas (ERCOT): demand grew past anything in the training year, and a tree model cannot predict values
 it has never seen. Its error went from 5% to 9%.
 
-**The input alarm was pure noise.** On an ordinary week, PSI read 4 to 7, twenty to thirty times the
-0.2 rule. Part of that is arithmetic: a week contains only seven values of a daily feature, too few to
+**The PSI alarm was pure noise.** On an ordinary week, PSI read 4 to 7, twenty to thirty-five times
+the 0.2 rule. Part of that is arithmetic: a week contains only seven values of a daily feature, too few to
 fill PSI's ten bins. Part is weather: even comparing four weeks with the same four weeks a year earlier,
 the median was above 1. Such an alarm either rings every week or, set high enough to stay quiet, never
 rings.
@@ -103,9 +104,10 @@ a few weeks of post-change data lose the yearly cycle that electricity demand de
 
 ## Then I gave the model the weather
 
-No real operator forecasts electricity without the weather, so I added hourly temperature (from the
-Open-Meteo archive, using the actual temperature as a stand-in for a perfect forecast). The model got much
-better: Texas's error in 2020 dropped from 5.2% to 3.4%.
+No real operator forecasts electricity without the weather, so I added hourly temperature from the
+Open-Meteo archive. (I first used the temperature that actually happened, a perfect forecast; rerunning
+with the day-ahead forecasts that were really available raised the error by about 5% and changed none of
+the conclusions.) The model got much better: Texas's error in 2020 dropped from 5.2% to 3.4%.
 
 And then it drifted *faster*. By 2025, the weather-aware model's Texas error was 14.3%, against 9.3% for
 the simple one. It had learned a precise relationship between temperature and demand, and demand growth
@@ -116,6 +118,14 @@ best alarm was one that watches the *inputs*: not PSI, but a classifier trained 
 the training data. It notices when the combination of temperature and demand has moved, which is precisely
 what the model depends on. The verdict from my simulation ("input drift is never the best signal") held
 for the simple model and flipped for the stronger one.
+
+## Running it for real
+
+The monitor itself is small. I packaged the winning rules as a weekly AWS Lambda function: the forecasting
+job drops its predictions and, a week later, the actual demand into S3; the function updates the score and
+emails a data scientist when it fires, with its estimate of when the change began. It costs cents a month,
+and replaying Texas through it gives exactly the same scores, and the same first alarm, as the offline
+experiment.
 
 ## What I'd tell a team
 

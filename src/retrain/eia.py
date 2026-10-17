@@ -64,7 +64,13 @@ def add_weather(f, ba):
     t = t.reindex(f.index.union(t.index)).interpolate(limit=3).reindex(f.index)
     f = f.assign(temp=t.values, temp_lag24=t.shift(24).values)
     f["temp_day_mean"] = f.groupby(f.index.normalize()).temp.transform("mean")
-    return f.dropna()
+    # Serving inputs: the day-ahead *forecast* that was available, where archived (mid-2021 on);
+    # observed before that. Yesterday's temperature (temp_lag24) is already known: stays observed.
+    fc = weather.fetch_forecast(ba).tz_convert(f.index.tz)
+    fc = fc.reindex(fc.index.union(f.index)).interpolate(limit=3).reindex(f.index)
+    f["temp_srv"] = fc.fillna(f["temp"]).values
+    f["temp_day_mean_srv"] = f.groupby(f.index.normalize()).temp_srv.transform("mean")
+    return f.dropna(subset=["temp", "temp_lag24", "temp_day_mean"])
 
 
 def features(s):
@@ -88,7 +94,8 @@ def features(s):
 
 
 def stream(ba, raw=None, start="2019-01-07", train_weeks=52, val_weeks=4, weather=False):
-    """Weekly batches (Monday-Sunday) for one operator; the first year trains the initial model."""
+    """weather: False | True (observed temperature everywhere: a perfect forecast) | "forecast"
+    (train on observed, predict and monitor with the archived day-ahead forecast where it exists)."""
     raw = load_raw() if raw is None else raw
     f = features(hourly(raw, ba))
     feats, drift = list(FEATURES), list(DRIFT_FEATURES)
@@ -101,13 +108,18 @@ def stream(ba, raw=None, start="2019-01-07", train_weeks=52, val_weeks=4, weathe
     for c in ("load", *DRIFT_FEATURES):
         f[c] = f[c] / scale
     week = f.index.tz_localize(None).to_period("W-SUN")
-    X, y, weeks = [], [], []
+    serve = [{"temp": "temp_srv", "temp_day_mean": "temp_day_mean_srv"}.get(c, c) for c in feats] \
+        if weather == "forecast" else None
+    X, y, weeks, Xs = [], [], [], []
     for w, g in f.groupby(week):
         if len(g) < 24 * 5:      # skip weeks mostly lost to data gaps
             continue
         X.append(g[feats].to_numpy(float))
+        if serve:
+            Xs.append(g[serve].to_numpy(float))
         y.append(g["load"].to_numpy(float))
         weeks.append(w.start_time)
     return SimpleNamespace(scenario=ba, X=X, y=y, weeks=weeks, onset=None, harmful=False,
                            train_batches=train_weeks, val_batches=val_weeks, season=52,
-                           drift_cols=[feats.index(c) for c in drift], scale=float(scale), weather=weather)
+                           drift_cols=[feats.index(c) for c in drift], scale=float(scale), weather=weather,
+                           X_serve=Xs or None)

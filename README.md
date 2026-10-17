@@ -95,7 +95,10 @@ exactly that. Retraining is now worth **14-17%** of total error (vs 2-5%):
 | Error ratio | +5.3 [-0.0, +12.3] | +5.2 [-0.0, +12.1] | +4.4 [-0.0, +10.9] |
 | Seasonal PSI | 0 (never fires) | 0 | 0 |
 
-Saving vs never retraining (total 113.7). Here an **input-drift** check wins: a classifier looking at all
+Saving vs never retraining (total 113.7). **With real forecasts instead of observed temperature**
+(Open-Meteo's archived day-ahead forecasts, available from mid-2021, so the whole 2022-25 test period),
+never-retraining cost rises by about 5% (to 119.2) and the ranking holds: classifier test +18.4 / +15.3 /
++2.8, Page-Hinkley +13.4 / +12.7 / +9.9 at retrain prices 1 / 4 / 16 weeks. Here an **input-drift** check wins: a classifier looking at all
 inputs together notices that the *combination* of temperature and demand has moved. So the simulation's
 "input drift is never the best signal" holds for the simple model but not the stronger one: **which
 signal to page on depends on the model, not just the data.**
@@ -124,6 +127,17 @@ operators. Positive = cheaper than never retraining.
 5. **Check simulation lessons against real structure**: seasonality broke the change-point window, and
    a stronger model reversed the verdict on input drift.
 
+## AWS: the monitor as a weekly Lambda (built, not deployed)
+
+`infra/app.yaml`: a weekly EventBridge schedule runs a pure-Python Lambda that reads a model's logged
+predictions and late actuals from S3, updates the Page-Hinkley / error-ratio / classifier-test score, and
+emails a data scientist through SNS when it fires, with the estimated change point. Pay-per-use only
+(cents per month; [COSTS.md](COSTS.md) also compares it with SageMaker Model Monitor).
+**Parity:** replaying ERCOT through the Lambda code locally gives the same scores as the offline backtest
+(largest difference 1e-14 over 310 weeks) and the same first alarm (week of 2022-02-28). cfn-lint clean;
+CloudBurn passes the high-severity gate. Deploy: `deploy/deploy_cost.sh`, `deploy/deploy.sh`,
+`python -m retrain.aws.replay aws ERCO`, then `deploy/down.sh --all`.
+
 ## Method notes
 
 - Synthetic: 30 test streams per scenario, 50 separate calibration streams; intervals are bootstrap over streams.
@@ -132,8 +146,9 @@ operators. Positive = cheaper than never retraining.
 - Real-data threshold grids were widened once after the first pass showed the chosen values sitting at
   the grid edges; both passes are in `results/real_runs.json`.
 - The main forecaster has no weather inputs; its errors (3-9%) are well above an operator's own forecast.
-  The weather variant uses *observed* temperature at one city per operator as a perfect forecast: an
-  upper bound on what weather adds, and a crude proxy for multi-state operators.
+  The weather variant trains on observed temperature at one city per operator (a crude proxy for
+  multi-state operators). It was run twice: serving observed temperature (a perfect forecast) and serving
+  the archived day-ahead forecast in the test period; results are close.
 - Weather data: Open-Meteo historical archive (CC BY 4.0, non-commercial use), fetched at runtime.
 
 ## Run
@@ -144,7 +159,7 @@ pip install -r requirements.txt -r requirements-dev.txt && pip install -e .
 pytest -q
 python -m retrain.experiment                  # synthetic study (~8 min on 11 cores)
 python -m retrain.realdata && python -m retrain.realdata --extra && python -m retrain.realdata --seasonal
-python -m retrain.realdata --cpw && python -m retrain.realdata --weather
+python -m retrain.realdata --cpw && python -m retrain.realdata --weather && python -m retrain.realdata --weather-forecast
 python notebooks/build.py                     # then execute each notebook
 ```
 

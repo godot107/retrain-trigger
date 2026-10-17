@@ -42,3 +42,23 @@ def fetch(ba, start="2018-12-25", end="2025-12-31"):
     s = pd.Series(data["hourly"]["temperature_2m"], index=pd.to_datetime(data["hourly"]["time"], utc=True),
                   name="temp", dtype=float)
     return s
+
+
+def fetch_forecast(ba, start="2021-06-01", end="2025-12-31"):
+    """Day-ahead temperature forecasts as they were issued (Open-Meteo Previous Runs API,
+    `temperature_2m_previous_day1` = the forecast made one day earlier). Available from mid-2021."""
+    path = DIR / f"{ba}_forecast.json"
+    if not path.exists():
+        DIR.mkdir(parents=True, exist_ok=True)
+        _, lat, lon = CITIES[ba]
+        url = (f"https://previous-runs-api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}"
+               f"&start_date={start}&end_date={end}&hourly=temperature_2m_previous_day1&timezone=UTC")
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=180) as r:
+            data = json.load(r)
+        if "hourly" not in data:
+            raise ValueError(f"unexpected Open-Meteo response for {ba}: {str(data)[:200]}")
+        path.write_text(json.dumps(data))
+    data = json.loads(path.read_text())
+    return pd.Series(data["hourly"]["temperature_2m_previous_day1"],
+                     index=pd.to_datetime(data["hourly"]["time"], utc=True), name="temp_fc", dtype=float)

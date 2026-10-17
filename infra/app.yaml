@@ -1,0 +1,152 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  retrain-trigger monitor: a weekly Lambda (EventBridge Scheduler) reads a model's logged predictions and
+  late-arriving actuals from S3, updates the Page-Hinkley / error-ratio / classifier-test score, and emails a
+  data scientist through SNS when it fires. Pay-per-use only: no always-on resources (see COSTS.md).
+
+Parameters:
+  CodeBucket:
+    Type: String
+    Description: Bucket holding the Lambda zip (output of artifacts.yaml).
+  CodeKey:
+    Type: String
+    Description: Object key of the Lambda zip (content-hashed by deploy.sh, so a code change redeploys).
+  Model:
+    Type: String
+    Default: ERCO
+    Description: Model id the schedule checks (S3 prefix models/<Model>/).
+  AlertEmail:
+    Type: String
+    Default: ""
+    Description: Optional address for retrain pages (confirm the SNS subscription email). Empty = reports in S3 only.
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref AlertEmail, ""]]
+
+Resources:
+  Data:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      OwnershipControls:
+        Rules: [{ ObjectOwnership: BucketOwnerEnforced }]
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-weeks          # a year of history covers a seasonal cycle; older weeks are not read
+            Status: Enabled
+            ExpirationInDays: 400
+            NoncurrentVersionExpiration: { NoncurrentDays: 7 }
+            AbortIncompleteMultipartUpload: { DaysAfterInitiation: 1 }
+
+  Pages:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: retrain-trigger-pages
+
+  PagesEmail:
+    Type: AWS::SNS::Subscription
+    Condition: HasEmail
+    Properties:
+      TopicArn: !Ref Pages
+      Protocol: email
+      Endpoint: !Ref AlertEmail
+
+  MonitorLogs:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      LogGroupName: /aws/lambda/retrain-trigger-monitor
+      RetentionInDays: 14
+
+  MonitorRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: monitor
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: s3:ListBucket
+                Resource: !GetAtt Data.Arn
+              - Effect: Allow
+                Action: [s3:GetObject, s3:PutObject]
+                Resource: !Sub "${Data.Arn}/models/*"
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref Pages
+              - Effect: Allow
+                Action: [logs:CreateLogStream, logs:PutLogEvents]
+                Resource: !Sub "${MonitorLogs.Arn}"
+
+  Monitor:
+    Type: AWS::Lambda::Function
+    DependsOn: MonitorLogs
+    Properties:
+      FunctionName: retrain-trigger-monitor
+      Description: Weekly retraining check (src/retrain/aws/handler.py + monitor_core.py)
+      Runtime: python3.13
+      Architectures: [arm64]          # cheaper per GB-second than x86
+      Handler: handler.lambda_handler
+      MemorySize: 512                 # the classifier test is pure Python: more memory = more CPU
+      Timeout: 300
+      Role: !GetAtt MonitorRole.Arn
+      Code: { S3Bucket: !Ref CodeBucket, S3Key: !Ref CodeKey }
+      Environment:
+        Variables:
+          BUCKET: !Ref Data
+          MODEL: !Ref Model
+          TOPIC_ARN: !If [HasEmail, !Ref Pages, ""]
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: invoke
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !GetAtt Monitor.Arn
+
+  Weekly:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: retrain-trigger-weekly
+      Description: Monday 06:00 UTC, after the previous week's actuals have landed
+      ScheduleExpression: cron(0 6 ? * MON *)
+      FlexibleTimeWindow: { Mode: "OFF" }
+      State: ENABLED
+      Target:
+        Arn: !GetAtt Monitor.Arn
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: !Sub '{"model": "${Model}"}'
+        RetryPolicy: { MaximumRetryAttempts: 2 }
+
+Outputs:
+  BucketName: { Value: !Ref Data }
+  TopicArn: { Value: !Ref Pages }
+  FunctionName: { Value: !Ref Monitor }

@@ -166,7 +166,8 @@ best.rename('cheapest trigger').to_frame().T
 - **Moderate (5-10):** error ratio with a change-point window: it retrains less often.
 - **Very expensive (20+):** in this simulation, never retraining wins: no change is costly enough
   to pay for the data scientist. In a real business that threshold is a number worth knowing.
-- **Input-drift triggers are never the cheapest**, at any price.
+- **Input-drift triggers are never the cheapest** here, at any price. (Notebook 3 finds an exception on
+  real data: with a stronger, weather-aware model, a multivariate input check wins.)
 
 **What this means in practice:** page on *performance* when labels come back reasonably fast; use input
 drift as an early, low-priority flag (and as the only signal when labels never come back); and when you
@@ -411,6 +412,17 @@ pd.DataFrame({f'retrain = {k} wk': {trig: f"{v['saving_vs_never']:+.1f}  [{v['ci
                                      for trig, v in res.items()} for k, res in wsv.items()})
 """)
     md("""
+**Without the perfect-forecast assumption:** the same model served the *archived day-ahead forecast*
+(what was actually available the day before, from mid-2021) in the test years:
+""")
+    code("""
+fsv = json.load(open('results/real_vs_never_weather_forecast.json'))
+pd.DataFrame({f'retrain = {k} wk': {trig: f"{v['saving_vs_never']:+.1f}  [{v['ci95'][0]:+.1f}, {v['ci95'][1]:+.1f}]"
+                                     for trig, v in res.items()} for k, res in fsv.items()})
+""")
+    md("""
+Never retraining costs about 5% more with real forecasts (119.2 vs 113.7), and the ranking is unchanged.
+
 - Savings rise to **14-17%** of total error at low and medium retrain prices (from 2-5% without weather).
 - The best trigger here is an **input-drift** one: the classifier two-sample test at its strictest setting
   (AUC > 0.99), retraining about 2.5 times per operator. A classifier looking at all inputs together

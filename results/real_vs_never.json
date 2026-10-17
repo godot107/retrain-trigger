@@ -1,0 +1,248 @@
+{
+ "1": {
+  "c2st": {
+   "saving_vs_never": 4.52,
+   "ci95": [
+    -1.26,
+    12.86
+   ],
+   "operators_better": 6
+  },
+  "error": {
+   "saving_vs_never": 3.84,
+   "ci95": [
+    0.21,
+    9.36
+   ],
+   "operators_better": 5
+  },
+  "error_cp": {
+   "saving_vs_never": 2.27,
+   "ci95": [
+    -0.0,
+    6.8
+   ],
+   "operators_better": 1
+  },
+  "ks": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "page_hinkley": {
+   "saving_vs_never": 3.85,
+   "ci95": [
+    0.03,
+    9.93
+   ],
+   "operators_better": 5
+  },
+  "page_hinkley_cp": {
+   "saving_vs_never": 3.44,
+   "ci95": [
+    0.57,
+    7.97
+   ],
+   "operators_better": 6
+  },
+  "pred_psi": {
+   "saving_vs_never": -2.68,
+   "ci95": [
+    -10.23,
+    6.95
+   ],
+   "operators_better": 3
+  },
+  "psi": {
+   "saving_vs_never": -24.94,
+   "ci95": [
+    -35.4,
+    -12.91
+   ],
+   "operators_better": 1
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": 6.53,
+   "ci95": [
+    1.17,
+    14.41
+   ],
+   "operators_better": 8
+  }
+ },
+ "4": {
+  "c2st": {
+   "saving_vs_never": 1.64,
+   "ci95": [
+    -4.34,
+    9.16
+   ],
+   "operators_better": 4
+  },
+  "error": {
+   "saving_vs_never": 2.13,
+   "ci95": [
+    -0.0,
+    6.38
+   ],
+   "operators_better": 1
+  },
+  "error_cp": {
+   "saving_vs_never": 2.13,
+   "ci95": [
+    -0.0,
+    6.38
+   ],
+   "operators_better": 1
+  },
+  "ks": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "page_hinkley": {
+   "saving_vs_never": 2.73,
+   "ci95": [
+    0.09,
+    6.94
+   ],
+   "operators_better": 4
+  },
+  "page_hinkley_cp": {
+   "saving_vs_never": 2.73,
+   "ci95": [
+    0.1,
+    6.99
+   ],
+   "operators_better": 4
+  },
+  "pred_psi": {
+   "saving_vs_never": -35.47,
+   "ci95": [
+    -47.89,
+    -22.72
+   ],
+   "operators_better": 0
+  },
+  "psi": {
+   "saving_vs_never": -123.4,
+   "ci95": [
+    -150.39,
+    -98.22
+   ],
+   "operators_better": 0
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": 2.71,
+   "ci95": [
+    -3.0,
+    10.67
+   ],
+   "operators_better": 6
+  }
+ },
+ "16": {
+  "c2st": {
+   "saving_vs_never": -9.87,
+   "ci95": [
+    -19.08,
+    -2.33
+   ],
+   "operators_better": 3
+  },
+  "error": {
+   "saving_vs_never": 1.57,
+   "ci95": [
+    -0.0,
+    4.71
+   ],
+   "operators_better": 1
+  },
+  "error_cp": {
+   "saving_vs_never": 1.57,
+   "ci95": [
+    -0.0,
+    4.71
+   ],
+   "operators_better": 1
+  },
+  "ks": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "page_hinkley": {
+   "saving_vs_never": -0.09,
+   "ci95": [
+    -3.11,
+    3.73
+   ],
+   "operators_better": 2
+  },
+  "page_hinkley_cp": {
+   "saving_vs_never": -0.09,
+   "ci95": [
+    -3.15,
+    3.58
+   ],
+   "operators_better": 2
+  },
+  "pred_psi": {
+   "saving_vs_never": -166.64,
+   "ci95": [
+    -205.31,
+    -127.5
+   ],
+   "operators_better": 0
+  },
+  "psi": {
+   "saving_vs_never": -517.23,
+   "ci95": [
+    -614.18,
+    -425.99
+   ],
+   "operators_better": 0
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": -12.55,
+   "ci95": [
+    -20.01,
+    -3.48
+   ],
+   "operators_better": 1
+  }
+ }
+}

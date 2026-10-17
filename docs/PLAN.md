@@ -1,5 +1,8 @@
 # Plan
 
+Stages 1-4 built 2026-10-17: results in the README and notebooks/. Plan kept as written;
+the day-one table below was 1 seed and is superseded by notebook 1.
+
 **Question:** when should a data scientist be told to retrain a model, and should a retrain just refit
 on fresh data or reset the hyperparameters too?
 

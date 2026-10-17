@@ -10,12 +10,16 @@ y = f(x) + noise. Scenarios, all starting to change at batch ONSET:
 - concept_sudden:      f itself changes (the same inputs now mean a different target); the inputs
                        look exactly as before, so input-drift checks are blind to it.
 - concept_gradual:     the same change phased in over 20 batches.
+- concept_complex:     the relationship becomes much more intricate (strong interactions, faster
+                       wiggles). Fresh data alone may not be enough: the model's tuned size and
+                       learning settings, chosen for the simpler world, may need re-tuning.
 """
 from dataclasses import dataclass
 
 import numpy as np
 
-SCENARIOS = ("none", "covariate_harmless", "covariate_harmful", "concept_sudden", "concept_gradual")
+SCENARIOS = ("none", "covariate_harmless", "covariate_harmful", "concept_sudden", "concept_gradual",
+             "concept_complex")
 ONSET = 40
 N_BATCHES = 80
 BATCH_SIZE = 500
@@ -35,6 +39,10 @@ def f(X, w):
     return w[0] * X[:, 0] + w[1] * np.sin(X[:, 1]) + w[2] * X[:, 2] ** 2 + 4.0 * np.maximum(X[:, 0] - 3, 0) ** 2
 
 
+def complex_term(X):
+    return 3.0 * np.sin(3 * X[:, 0]) * np.cos(2 * X[:, 2]) + 2.0 * X[:, 1] * X[:, 2]
+
+
 def stream(scenario, seed=0):
     rng = np.random.default_rng(seed)
     w0, w1 = np.array([2.0, 1.5, 0.5]), np.array([-1.0, 1.5, 0.5])   # concept change flips x0's effect
@@ -51,7 +59,10 @@ def stream(scenario, seed=0):
         if scenario == "covariate_harmful" and b >= ONSET:
             mean = np.array([2.5, 0.0, 0.0])     # x0 moves past 3, where f bends
         Xb = rng.multivariate_normal(mean, cov, BATCH_SIZE)
-        w = w0 if not scenario.startswith("concept") else (1 - k) * w0 + k * w1
+        w = (1 - k) * w0 + k * w1 if scenario in ("concept_sudden", "concept_gradual") else w0
+        target = f(Xb, w)
+        if scenario == "concept_complex" and b >= ONSET:
+            target = target + complex_term(Xb)
         X.append(Xb)
-        y.append(f(Xb, w) + rng.normal(0, 0.5, BATCH_SIZE))
+        y.append(target + rng.normal(0, 0.5, BATCH_SIZE))
     return Stream(scenario, X, y, ONSET, harmful=scenario not in ("none", "covariate_harmless"))

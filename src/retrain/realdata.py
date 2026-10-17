@@ -39,15 +39,25 @@ EXTRA = {
     "schedule": [104],
     "psi_seasonal": [0.5, 1.0, 2.0, 4.0, 8.0],   # 4-week vs same 4 weeks last year, 5 bins
 }
+# Third pass: change point with a full-year window, post-change rows weighted (backtest.CP_WEIGHT).
+CPW = {"error_cpw": [1.1, 1.25, 1.5, 2.0, 2.5, 3.0], "page_hinkley_cpw": [0.5, 1, 2, 4, 8, 16]}
 RETRAIN_WEEKS = (1, 4, 16)
 SETTINGS = {"label_delay": 1, "window": 52, "cooldown": 4}
 TUNE_YEARS, TEST_YEARS = (2020, 2021), (2022, 2023, 2024, 2025)
 
 
-def run_ba(ba, grid=None):
+WX_GRID = {  # weather model: the triggers that mattered, full grids
+    "never": [None], "schedule": [13, 26, 52, 104],
+    "error": [1.1, 1.25, 1.5, 2.0, 2.5, 3.0], "page_hinkley": [0.5, 1, 2, 4, 8, 16],
+    "error_cpw": [1.1, 1.25, 1.5, 2.0, 2.5, 3.0], "page_hinkley_cpw": [0.5, 1, 2, 4, 8, 16],
+    "c2st": [0.6, 0.7, 0.8, 0.9, 0.95, 0.99], "psi_seasonal": [0.5, 1.0, 2.0, 4.0, 8.0],
+}
+
+
+def run_ba(ba, grid=None, weather=False):
     grid = grid or GRID
     raw = eia.load_raw()
-    s = eia.stream(ba, raw)
+    s = eia.stream(ba, raw, weather=weather)
     init = backtest.initial(s)
     weeks = [w.isoformat() for w in s.weeks[s.train_batches:]]
     out = []
@@ -59,7 +69,7 @@ def run_ba(ba, grid=None):
             if trig == "schedule":
                 extra["every"] = v
             elif trig != "never":
-                th[trig.removesuffix("_cp")] = v
+                th[trig.removesuffix("_cpw").removesuffix("_cp")] = v
             r = backtest.run(s, "schedule" if trig == "schedule" else trig, th, init=init, **SETTINGS, **extra)
             out.append({"ba": ba, "trigger": trig, "threshold": v, "weeks": weeks, "mae": r.mae,
                         "retrains": [s.weeks[b].isoformat() for b in r.retrains],
@@ -71,6 +81,14 @@ def _extra(ba):
     return run_ba(ba, EXTRA)
 
 
+def _wx(ba):
+    return run_ba(ba, WX_GRID, weather=True)
+
+
+def _cpw(ba):
+    return run_ba(ba, CPW)
+
+
 def _seasonal(ba):
     return run_ba(ba, {"psi_seasonal": EXTRA["psi_seasonal"]})
 
@@ -79,7 +97,13 @@ def main(argv=None):
     """No args: the first grid (overwrites). `--extra`: the extended grid, appended."""
     argv = sys.argv[1:] if argv is None else argv
     RES.mkdir(exist_ok=True)
-    fn = {"--extra": _extra, "--seasonal": _seasonal}.get(argv[0] if argv else "", run_ba)
+    if argv[:1] == ["--weather"]:     # separate results file
+        with ProcessPoolExecutor(max_workers=min(len(eia.BAS), max(1, (os.cpu_count() or 2) - 1))) as pool:
+            rows = [r for rs in pool.map(_wx, eia.BAS) for r in rs]
+        (RES / "real_runs_weather.json").write_text(json.dumps(rows))
+        print(len(rows), "weather runs")
+        return
+    fn = {"--extra": _extra, "--seasonal": _seasonal, "--cpw": _cpw}.get(argv[0] if argv else "", run_ba)
     with ProcessPoolExecutor(max_workers=min(len(eia.BAS), max(1, (os.cpu_count() or 2) - 1))) as pool:
         rows = [r for rs in pool.map(fn, eia.BAS) for r in rs]
     if fn is not run_ba:
@@ -115,3 +139,13 @@ def choose_and_score(t, k):
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def choose_per_operator(t, k):
+    """Each operator gets its own threshold (lowest 2020-21 cost for that operator), scored on 2022-25.
+    Returns total test cost per trigger, to compare with one shared threshold (choose_and_score)."""
+    t = t.assign(cost=t.error_sum + k * t.normal_error * t.retrains)
+    w = t.pivot_table(index=["trigger", "ba", "threshold"], columns="period", values="cost", dropna=False).reset_index()
+    w = w.dropna(subset=["tune"])
+    best = w.loc[w.groupby(["trigger", "ba"]).tune.idxmin()]
+    return best.groupby("trigger").agg(tune=("tune", "sum"), test=("test", "sum")).sort_values("test")

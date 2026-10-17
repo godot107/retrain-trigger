@@ -31,6 +31,7 @@ TZ = {"ERCO": "America/Chicago", "PJM": "America/New_York", "CISO": "America/Los
       "BPAT": "America/Los_Angeles", "DUK": "America/New_York", "FPL": "America/New_York"}
 BAS = tuple(TZ)
 FEATURES = ["hour", "dow", "doy", "holiday", "lag24", "lag48", "lag168", "prev_mean", "prev_max", "same_hour_7d"]
+WEATHER_FEATURES = ["temp", "temp_lag24", "temp_day_mean"]   # optional (weather=True): see weather.py
 DRIFT_FEATURES = ["lag24", "lag48", "lag168", "prev_mean", "prev_max", "same_hour_7d"]   # calendar always "drifts"
 EVENTS = {"COVID lockdowns": "2020-03-16", "Winter Storm Uri": "2021-02-13",
           "Winter Storm Elliott": "2022-12-23"}
@@ -55,6 +56,17 @@ def hourly(df, ba, max_gap=6):
     return s.tz_convert(TZ[ba])
 
 
+def add_weather(f, ba):
+    """Temperature at the target hour, the same hour yesterday, and the target day's mean
+    (observed values standing in for a perfect day-ahead forecast)."""
+    from retrain import weather
+    t = weather.fetch(ba).tz_convert(f.index.tz)
+    t = t.reindex(f.index.union(t.index)).interpolate(limit=3).reindex(f.index)
+    f = f.assign(temp=t.values, temp_lag24=t.shift(24).values)
+    f["temp_day_mean"] = f.groupby(f.index.normalize()).temp.transform("mean")
+    return f.dropna()
+
+
 def features(s):
     """One row per hour with the day-ahead features; every lag is at least 24 h old, and the daily
     summaries use the previous calendar day only, so nothing from day D leaks into its own forecast."""
@@ -75,10 +87,15 @@ def features(s):
     return out.dropna()
 
 
-def stream(ba, raw=None, start="2019-01-07", train_weeks=52, val_weeks=4):
+def stream(ba, raw=None, start="2019-01-07", train_weeks=52, val_weeks=4, weather=False):
     """Weekly batches (Monday-Sunday) for one operator; the first year trains the initial model."""
     raw = load_raw() if raw is None else raw
     f = features(hourly(raw, ba))
+    feats, drift = list(FEATURES), list(DRIFT_FEATURES)
+    if weather:
+        f = add_weather(f, ba)
+        feats += WEATHER_FEATURES
+        drift += ["temp"]
     f = f[f.index >= pd.Timestamp(start, tz=f.index.tz)]
     scale = f.loc[f.index.year == 2019, "load"].mean()
     for c in ("load", *DRIFT_FEATURES):
@@ -88,9 +105,9 @@ def stream(ba, raw=None, start="2019-01-07", train_weeks=52, val_weeks=4):
     for w, g in f.groupby(week):
         if len(g) < 24 * 5:      # skip weeks mostly lost to data gaps
             continue
-        X.append(g[FEATURES].to_numpy(float))
+        X.append(g[feats].to_numpy(float))
         y.append(g["load"].to_numpy(float))
         weeks.append(w.start_time)
     return SimpleNamespace(scenario=ba, X=X, y=y, weeks=weeks, onset=None, harmful=False,
                            train_batches=train_weeks, val_batches=val_weeks, season=52,
-                           drift_cols=[FEATURES.index(c) for c in DRIFT_FEATURES], scale=float(scale))
+                           drift_cols=[feats.index(c) for c in drift], scale=float(scale), weather=weather)

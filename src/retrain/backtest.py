@@ -22,9 +22,11 @@ from retrain import detectors, models
 TRAIN_BATCHES = 20
 VAL_BATCHES = 2
 TRIGGERS = ("never", "schedule", "psi", "psi_rule", "ks", "c2st", "pred_psi", "error", "page_hinkley",
-            "psi_error", "error_cp", "page_hinkley_cp", "oracle")
+            "psi_error", "error_cp", "page_hinkley_cp", "error_cpw", "page_hinkley_cpw", "oracle")
 # *_cp: same alarm as the base trigger, but the retrain uses only data since the estimated change point
 # (where the cumulative excess error was lowest), waiting until enough post-change data is labelled.
+# *_cpw: keeps the full window (so a seasonal cycle survives) but weights post-change rows CP_WEIGHT x.
+CP_WEIGHT = 4.0
 LABEL_FREE = {"psi", "psi_rule", "ks", "c2st", "pred_psi"}
 
 
@@ -147,7 +149,7 @@ def run(s, trigger, thresholds, action="refit", label_delay=2, window=10, every=
             fired = any(recent_psi[-5:]) and err > thresholds["psi_error"]
             res.scores.append(err)
         else:
-            base = trigger.removesuffix("_cp")
+            base = trigger.removesuffix("_cpw").removesuffix("_cp")
             sc = score(base, st, s, b, pred, mae_hist, label_delay, seed)
             res.scores.append(sc)
             thr = 0.2 if trigger == "psi_rule" else thresholds[base]
@@ -156,12 +158,21 @@ def run(s, trigger, thresholds, action="refit", label_delay=2, window=10, every=
             continue
         hi = labelled_upto + 1
         lo = s.onset if trigger == "oracle" else max(0, hi - window)
+        weights = None
         if trigger.endswith("_cp"):
             lo = max(lo, change_point(mae_hist, st, hi, st.val_mae))
         if hi - lo < vb + 1:
             continue
         Xt, yt, Xv, yv = _split(s.X, s.y, lo, hi, vb)
-        model, params, val_mae = models.retrain(action, st.model, st.params, Xt, yt, Xv, yv, seed)
+        if trigger.endswith("_cpw"):
+            cp = change_point(mae_hist, st, hi, st.val_mae)
+            if hi - cp < vb + 1:          # wait until some post-change data is in the training part
+                continue
+            sizes = [len(s.y[i]) for i in range(lo, hi - vb)]
+            weights = np.concatenate([np.full(n, CP_WEIGHT if i >= cp else 1.0)
+                                      for i, n in zip(range(lo, hi - vb), sizes)])
+        model, params, val_mae = models.retrain(action, st.model, st.params, Xt, yt, Xv, yv, seed,
+                                                sample_weight=weights)
         dc = getattr(s, "drift_cols", None)
         st = State(model, params, np.vstack(s.X[lo:hi]), val_mae, b)
         if dc is not None:

@@ -74,8 +74,19 @@ def main(argv=None):
         old = old[~((old.study == "triggers") & old.trigger.isin(only))]
         df = pd.concat([old, df], ignore_index=True)
     df.to_csv(RES / "synthetic_runs.csv", index=False)
+    cost_curve()
     print(df[df.study == "triggers"].groupby(["scenario", "trigger"]).error_total.mean().unstack(0).round(1))
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
+
+def cost_curve(prices=(0, 1, 2, 5, 10, 20, 40)):
+    """Average total cost over all scenarios (equal weight) for each trigger and retrain price."""
+    t = pd.read_csv(RES / "synthetic_runs.csv")
+    t = t[t.study == "triggers"]
+    cc = pd.DataFrame({c: t.assign(cost=t.error_total + c * t.retrains).groupby(["trigger", "scenario"])
+                       .cost.mean().unstack().mean(axis=1) for c in prices})
+    cc.to_csv(RES / "cost_curve_synthetic.csv")
+    return cc

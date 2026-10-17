@@ -1,0 +1,176 @@
+{
+ "1": {
+  "c2st": {
+   "saving_vs_never": 19.04,
+   "ci95": [
+    4.3,
+    41.19
+   ],
+   "operators_better": 11
+  },
+  "error": {
+   "saving_vs_never": 5.34,
+   "ci95": [
+    -0.0,
+    12.34
+   ],
+   "operators_better": 3
+  },
+  "error_cpw": {
+   "saving_vs_never": 7.0,
+   "ci95": [
+    -0.0,
+    15.92
+   ],
+   "operators_better": 3
+  },
+  "page_hinkley": {
+   "saving_vs_never": 12.87,
+   "ci95": [
+    1.19,
+    30.79
+   ],
+   "operators_better": 6
+  },
+  "page_hinkley_cpw": {
+   "saving_vs_never": 12.74,
+   "ci95": [
+    1.02,
+    31.22
+   ],
+   "operators_better": 6
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": 17.52,
+   "ci95": [
+    4.08,
+    37.45
+   ],
+   "operators_better": 11
+  }
+ },
+ "4": {
+  "c2st": {
+   "saving_vs_never": 15.87,
+   "ci95": [
+    1.75,
+    37.22
+   ],
+   "operators_better": 9
+  },
+  "error": {
+   "saving_vs_never": 5.15,
+   "ci95": [
+    -0.0,
+    12.06
+   ],
+   "operators_better": 3
+  },
+  "error_cpw": {
+   "saving_vs_never": 6.74,
+   "ci95": [
+    -0.0,
+    15.44
+   ],
+   "operators_better": 3
+  },
+  "page_hinkley": {
+   "saving_vs_never": 12.34,
+   "ci95": [
+    0.82,
+    30.11
+   ],
+   "operators_better": 5
+  },
+  "page_hinkley_cpw": {
+   "saving_vs_never": 12.1,
+   "ci95": [
+    0.65,
+    30.39
+   ],
+   "operators_better": 5
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": 14.92,
+   "ci95": [
+    1.38,
+    35.01
+   ],
+   "operators_better": 8
+  }
+ },
+ "16": {
+  "c2st": {
+   "saving_vs_never": 3.21,
+   "ci95": [
+    -10.39,
+    22.37
+   ],
+   "operators_better": 4
+  },
+  "error": {
+   "saving_vs_never": 4.42,
+   "ci95": [
+    -0.0,
+    10.91
+   ],
+   "operators_better": 3
+  },
+  "error_cpw": {
+   "saving_vs_never": 5.67,
+   "ci95": [
+    -0.0,
+    13.52
+   ],
+   "operators_better": 3
+  },
+  "page_hinkley": {
+   "saving_vs_never": 10.21,
+   "ci95": [
+    -0.95,
+    27.17
+   ],
+   "operators_better": 3
+  },
+  "page_hinkley_cpw": {
+   "saving_vs_never": 9.56,
+   "ci95": [
+    -1.22,
+    26.81
+   ],
+   "operators_better": 3
+  },
+  "psi_seasonal": {
+   "saving_vs_never": -0.0,
+   "ci95": [
+    -0.0,
+    -0.0
+   ],
+   "operators_better": 0
+  },
+  "schedule": {
+   "saving_vs_never": 4.51,
+   "ci95": [
+    -9.45,
+    25.37
+   ],
+   "operators_better": 2
+  }
+ }
+}

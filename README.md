@@ -56,7 +56,9 @@ Input-drift triggers are never the cheapest, at any price.
 The warm-start failure is a library behaviour worth knowing: scikit-learn's histogram gradient boosting
 re-learns its feature binning on the new data but, while adding trees, evaluates the old trees on the
 new bins (read in the library source). The damage grows with the shift: error 0.07 / 0.96 / 2.58 at
-shifts of 0 / 1 / 4, against 0.01 for a fresh fit. **With this model, after drift, refit.**
+shifts of 0 / 1 / 4, against 0.01 for a fresh fit. It is documented in one line ("for results to be
+valid, the estimator should be re-trained on the same data only") but nothing warns at run time.
+**With this model, after drift, refit.**
 
 ## 3 · Real data: day-ahead electricity demand
 
@@ -73,7 +75,30 @@ used week by week to 2025. No known "right" retrain dates, so every trigger's th
 - **Performance triggers are the safe default:** they fire rarely (ERCOT once or twice) and save a little
   at low and medium retrain prices. Savings vs never retraining are small, 2-5% of total error.
 - **The change-point trick does not transfer:** on seasonal data a few weeks of post-change data lose
-  the yearly cycle, and error jumps from 4-7% to 6-26%.
+  the yearly cycle, and error jumps from 4-7% to 6-26%. Keeping a full year and weighting the post-change
+  weeks fixes the failure but doesn't beat the plain triggers (and gives back the simulated benefit).
+- **One threshold shared by all operators beats a threshold per operator**: two years of one operator's
+  history is too little to tune on.
+
+### With weather: a stronger model is more fragile
+
+Adding hourly temperature (Open-Meteo archive, one city per operator, used as a perfect next-day
+forecast) cuts error substantially, but ERCOT's error now climbs from 3.4% to **14.3%** by 2025 (vs 5.2%
+to 9.3% without weather): the model leans on the temperature-to-demand relationship, and growth changes
+exactly that. Retraining is now worth **14-17%** of total error (vs 2-5%):
+
+| Retrain price (weeks of normal error) | 1 | 4 | 16 |
+|---|---|---|---|
+| Classifier two-sample test (input drift, AUC > 0.99) | **+19.0** [+4.3, +41.2] | **+15.9** [+1.8, +37.2] | +3.2 [-10.4, +22.4] |
+| Fixed schedule (every 2 years) | +17.5 [+4.1, +37.5] | +14.9 [+1.4, +35.0] | +4.5 [-9.4, +25.4] |
+| Page-Hinkley (error) | +12.9 [+1.2, +30.8] | +12.3 [+0.8, +30.1] | **+10.2** [-0.9, +27.2] |
+| Error ratio | +5.3 [-0.0, +12.3] | +5.2 [-0.0, +12.1] | +4.4 [-0.0, +10.9] |
+| Seasonal PSI | 0 (never fires) | 0 | 0 |
+
+Saving vs never retraining (total 113.7). Here an **input-drift** check wins: a classifier looking at all
+inputs together notices that the *combination* of temperature and demand has moved. So the simulation's
+"input drift is never the best signal" holds for the simple model but not the stronger one: **which
+signal to page on depends on the model, not just the data.**
 
 | Retrain price (weeks of normal error) | 1 | 4 | 16 |
 |---|---|---|---|
@@ -89,13 +114,15 @@ operators. Positive = cheaper than never retraining.
 
 ## What to take away
 
-1. **Page on performance** when true answers come back reasonably fast. Use input drift as an early,
-   low-priority flag, or as the only signal when answers never come back, and calibrate it on your own
-   data: the 0.2 rule can be meaningless.
+1. **Page on performance** when true answers come back reasonably fast. If you watch inputs, prefer a
+   multivariate check (a classifier telling old data from new) over per-feature PSI, and calibrate it
+   on your own data: the 0.2 rule can be meaningless. Test both on your model: a stronger model can
+   depend on exactly the input combinations that drift.
 2. **Price the retrain.** The right trigger, and whether to retrain at all, depends on it.
 3. **Retrain on the right data**, and re-tune hyperparameters when the relationship got more complex.
 4. **Don't warm-start a histogram gradient-boosting model on shifted data.**
-5. **Check simulation lessons against real structure** (here, seasonality broke the change-point window).
+5. **Check simulation lessons against real structure**: seasonality broke the change-point window, and
+   a stronger model reversed the verdict on input drift.
 
 ## Method notes
 
@@ -104,8 +131,10 @@ operators. Positive = cheaper than never retraining.
   operators (a per-operator threshold would need more history than two years gives).
 - Real-data threshold grids were widened once after the first pass showed the chosen values sitting at
   the grid edges; both passes are in `results/real_runs.json`.
-- The forecaster has no weather inputs; its errors (3-9%) are well above an operator's own forecast.
-  That is acceptable for comparing retraining rules, not for judging the forecast itself.
+- The main forecaster has no weather inputs; its errors (3-9%) are well above an operator's own forecast.
+  The weather variant uses *observed* temperature at one city per operator as a perfect forecast: an
+  upper bound on what weather adds, and a crude proxy for multi-state operators.
+- Weather data: Open-Meteo historical archive (CC BY 4.0, non-commercial use), fetched at runtime.
 
 ## Run
 
@@ -115,6 +144,7 @@ pip install -r requirements.txt -r requirements-dev.txt && pip install -e .
 pytest -q
 python -m retrain.experiment                  # synthetic study (~8 min on 11 cores)
 python -m retrain.realdata && python -m retrain.realdata --extra && python -m retrain.realdata --seasonal
+python -m retrain.realdata --cpw && python -m retrain.realdata --weather
 python notebooks/build.py                     # then execute each notebook
 ```
 

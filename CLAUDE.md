@@ -15,6 +15,8 @@ pytest -q                         # ~10 s when the machine is idle
 python -m retrain.experiment      # calibrate + synthetic study, 6 scenarios x 30 seeds (~8 min, 11 procs)
 python -m retrain.experiment --only error_cp,page_hinkley_cp   # rerun some triggers with saved thresholds
 python -m retrain.realdata        # EIA-930, 12 operators x 34 trigger/threshold runs (~1 h)
+python -m retrain.realdata --extra | --seasonal | --cpw    # appended passes (wider grids, seasonal PSI, weighted cp)
+python -m retrain.realdata --weather   # weather model -> results/real_runs_weather.json (~30 min)
 python notebooks/build.py && for n in notebooks/0*.ipynb; do jupyter nbconvert --to notebook --execute --inplace $n; done
 ```
 
@@ -44,3 +46,6 @@ python notebooks/build.py && for n in notebooks/0*.ipynb; do jupyter nbconvert -
 - A shared initial State is deep-copied per run (warm start mutates the model).
 - Parallel runs: OMP_NUM_THREADS=1 per process (set in experiment.py / realdata.py).
 - Real data: calendar features are excluded from input-drift checks (`drift_cols`): they "drift" by design.
+- Weekly PSI on day-level features is structurally huge (7 distinct values per week can't fill 10 bins).
+- realdata threshold keys: strip `_cpw` before `_cp` (a missed suffix once left `_cpw` thresholds at 1e9).
+- `weather.py`: Open-Meteo archive, observed temp as perfect forecast; cached in data/weather/.

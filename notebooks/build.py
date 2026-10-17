@@ -25,7 +25,8 @@ LABELS = {'never': 'never retrain', 'schedule': 'every 10 batches', 'psi': 'inpu
           'psi_rule': 'input drift: PSI > 0.2 rule', 'ks': 'input drift: KS test', 'c2st': 'input drift: classifier test',
           'pred_psi': 'prediction drift: PSI', 'error': 'error ratio', 'page_hinkley': 'Page-Hinkley (error)',
           'psi_error': 'input flag + error confirms', 'error_cp': 'error ratio + change point',
-          'page_hinkley_cp': 'Page-Hinkley + change point', 'oracle': 'oracle (knows the change)'}
+          'page_hinkley_cp': 'Page-Hinkley + change point', 'error_cpw': 'error ratio + weighted window',
+          'page_hinkley_cpw': 'Page-Hinkley + weighted window', 'oracle': 'oracle (knows the change)'}
 """
 
 
@@ -96,7 +97,7 @@ def ci(x):
     rng = np.random.default_rng(0); b = rng.choice(x.values, (2000, len(x))).mean(1)
     return (np.percentile(b, 97.5) - np.percentile(b, 2.5)) / 2
 order = ['never', 'schedule', 'psi_rule', 'psi', 'ks', 'c2st', 'pred_psi', 'psi_error', 'error', 'page_hinkley',
-         'error_cp', 'page_hinkley_cp', 'oracle']
+         'error_cp', 'page_hinkley_cp', 'error_cpw', 'page_hinkley_cpw', 'oracle']
 g = t.groupby(['trigger', 'scenario']).error_total
 tab = (g.mean().round(1).astype(str) + ' ± ' + g.apply(ci).round(1).astype(str)).unstack().reindex(order)
 tab.index = [LABELS[i] for i in tab.index]
@@ -136,6 +137,11 @@ so the new model is a blend of the old world and the new one.
 the change began. Retraining only on data after that point (and waiting until there is enough of it)
 nearly closes the gap: 43.0, with half the retrains. It hurts when inputs move to new territory (47.0
 vs 40.6), where the post-change window is too small.
+
+A compromise, the **weighted window**, keeps the full window but counts post-change rows 4 times. It
+gives the benefit back (81.5 on sudden concept drift: pre-change rows that now mean the opposite still
+pull the model the wrong way). Notebook 3 shows why it was worth trying anyway: on seasonal real data the
+short window fails and the weighted one doesn't.
 
 ## 5 · Pricing the retrain: which trigger is cheapest?
 
@@ -218,8 +224,12 @@ The damage grows with the shift. Reading scikit-learn's source explains it: on e
 re-learns how to bucket ("bin") each feature from the *new* data, but while adding trees it evaluates the
 *old* trees on the newly bucketed data, whose split points referred to the old buckets. The new trees
 learn to correct a wrong starting point; at prediction time the old trees use their original real-valued
-splits, so the correction no longer matches. **Practical rule: with this library, warm-start only on data
-from the same distribution; after drift, refit.**
+splits, so the correction no longer matches.
+
+The documentation does say so, in one line of the `warm_start` parameter: *"For results to be valid, the
+estimator should be re-trained on the same data only."* Nothing warns at run time: the model fits and
+predicts without complaint. **Practical rule: with this library, warm start only to add trees on the same
+data; after drift, refit.**
 
 ## How fast do labels need to come back?
 
@@ -351,7 +361,68 @@ cp = t[(t.period == 'test') & t.trigger.isin(['page_hinkley', 'page_hinkley_cp']
 (cp.pivot(index='ba', columns='trigger', values='error_mean') * 100).round(2)
 """)
     md("""
-## 4 · When did each trigger retrain ERCOT?
+A compromise keeps a **full year** of training data and weights the post-change weeks 4 times. That
+removes the failure (Page-Hinkley at 1.0: 5.33% instead of 12.98%), but it doesn't beat the plain
+triggers, and in the simulation it gave the change-point benefit back. No free lunch.
+""")
+    code("""
+w = t[(t.period == 'test') & t.trigger.isin(['page_hinkley', 'page_hinkley_cp', 'page_hinkley_cpw'])]
+(w.groupby(['threshold', 'trigger']).error_mean.mean().unstack() * 100).round(2)
+""")
+    md("""
+## 4 · One threshold for everyone, or one per operator?
+
+Each operator could get the threshold that worked best for *it* in 2020-21. Total test cost, retrain = 4 weeks:
+""")
+    code("""
+po = pd.read_csv('results/real_per_operator.csv', index_col=0)
+po[po.k == 4][['shared', 'per-operator']].round(2).sort_values('shared')
+""")
+    md("""
+Per-operator thresholds are never clearly better and sometimes far worse: two years of one operator's
+history is too little to tune on. **Pooling across operators is the more robust choice.**
+
+## 5 · A stronger model: add weather
+
+The forecaster above has no weather, which no real operator would accept. Adding hourly temperature
+(Open-Meteo historical archive, one representative city per operator, used as a *perfect* next-day
+forecast) cuts its error substantially, so how does it drift?
+""")
+    code("""
+wrows = json.load(open('results/real_runs_weather.json'))
+wt = realdata.table(wrows)
+wnever = {r['ba']: r for r in wrows if r['trigger'] == 'never'}
+wyr = pd.DataFrame({ba: pd.Series(r['mae'], index=pd.to_datetime(r['weeks'])).groupby(lambda x: x.year).mean()
+                    for ba, r in wnever.items()}).T
+cmp = pd.DataFrame({'no weather 2020': yr[2020], 'no weather 2025': yr[2025],
+                    'weather 2020': wyr[2020], 'weather 2025': wyr[2025]}) * 100
+cmp.round(1)
+""")
+    md("""
+**The better model is more fragile.** With weather, ERCOT starts at 3.4% error (vs 5.2%) but reaches
+14.3% by 2025 (vs 9.3%): it leans on the temperature-to-demand relationship, and growth changes exactly
+that. Florida shows the same pattern. So retraining matters more:
+""")
+    code("""
+wsv = json.load(open('results/real_vs_never_weather.json'))
+total = wt[(wt.period == 'test') & (wt.trigger == 'never')].error_sum.sum()
+print(f'never retrain, total test cost: {total:.1f}')
+pd.DataFrame({f'retrain = {k} wk': {trig: f"{v['saving_vs_never']:+.1f}  [{v['ci95'][0]:+.1f}, {v['ci95'][1]:+.1f}]"
+                                     for trig, v in res.items()} for k, res in wsv.items()})
+""")
+    md("""
+- Savings rise to **14-17%** of total error at low and medium retrain prices (from 2-5% without weather).
+- The best trigger here is an **input-drift** one: the classifier two-sample test at its strictest setting
+  (AUC > 0.99), retraining about 2.5 times per operator. A classifier looking at all inputs together
+  notices that the *combination* of temperature and demand has moved, which the model depends on. Simple
+  PSI, even season-matched, still never fires usefully.
+- A two-year schedule is a close second; at a high retrain price Page-Hinkley is best, but its interval
+  includes zero.
+
+So the simulation's verdict ("input drift is never the best signal") holds for the simple model, not for
+the stronger one. **Which signal to page on depends on the model as much as on the data.**
+
+## 6 · When did each trigger retrain ERCOT? (no-weather model)
 """)
     code("""
 chosen = realdata.choose_and_score(t, 4).set_index('trigger').threshold
@@ -370,11 +441,12 @@ plt.tight_layout()
     md("""
 ## What this shows
 
-- On real, weather-driven data, **input-drift monitoring as usually configured is noise**: weekly PSI
-  sits at 4-7 on ordinary weeks. If you use it, compare like with like (same season), over enough data,
-  and expect to set thresholds far above 0.2.
+- On real, weather-driven data, **PSI as usually configured is noise**: it sits at 4-7 on ordinary
+  weeks. A multivariate check (a classifier telling old data from new) at a strict threshold is a
+  different matter: with the weather model it was the best trigger.
 - **Performance triggers are the safe default** when labels come back quickly: they fire rarely and
-  save a little at every retrain price.
+  save something at most retrain prices.
+- **A stronger model can be more fragile**, and then retraining is worth 14-17% instead of 2-5%.
 - **Retraining is worth most where the world grows past the training range** (ERCOT); a tree model can't
   extrapolate, so growth is the drift that matters for this kind of model.
 - Ideas that win in simulation (change-point windows) need checking against the real data's structure

@@ -27,28 +27,28 @@ def make(params, seed=0, **extra):
     return HistGradientBoostingRegressor(random_state=seed, **params, **extra)
 
 
-def tune(X, y, Xval, yval, seed=0):
+def tune(X, y, Xval, yval, seed=0, sample_weight=None):
     """Random search; returns (best params, fitted model, validation MAE)."""
     rng = np.random.default_rng(seed)
     best = None
     for _ in range(N_CANDIDATES):
         params = {k: v[rng.integers(len(v))] for k, v in SEARCH_SPACE.items()}
-        m = make(params, seed).fit(X, y)
+        m = make(params, seed).fit(X, y, sample_weight=sample_weight)
         mae = float(np.mean(np.abs(m.predict(Xval) - yval)))
         if best is None or mae < best[2]:
             best = (params, m, mae)
     return best
 
 
-def retrain(action, old_model, params, X, y, Xval, yval, seed=0):
+def retrain(action, old_model, params, X, y, Xval, yval, seed=0, sample_weight=None):
     """Returns (model, params, validation MAE) after the chosen action."""
     if action == "retune":
-        params, m, mae = tune(X, y, Xval, yval, seed)
+        params, m, mae = tune(X, y, Xval, yval, seed, sample_weight)
         return m, params, mae
     if action == "warm":
         m = old_model
         m.set_params(warm_start=True, max_iter=m.max_iter + 100)
-        m.fit(X, y)
+        m.fit(X, y, sample_weight=sample_weight)
     else:  # refit
-        m = make(params, seed).fit(X, y)
+        m = make(params, seed).fit(X, y, sample_weight=sample_weight)
     return m, params, float(np.mean(np.abs(m.predict(Xval) - yval)))

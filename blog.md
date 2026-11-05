@@ -119,13 +119,14 @@ the training data. It notices when the combination of temperature and demand has
 what the model depends on. The verdict from my simulation ("input drift is never the best signal") held
 for the simple model and flipped for the stronger one.
 
-## Running it for real
+## Packaging it as a monitor
 
-The monitor itself is small. I packaged the winning rules as a weekly AWS Lambda function: the forecasting
-job drops its predictions and, a week later, the actual demand into S3; the function updates the score and
-emails a data scientist when it fires, with its estimate of when the change began. It costs cents a month,
-and replaying Texas through it gives exactly the same scores, and the same first alarm, as the offline
-experiment.
+The monitor itself is small. I packaged the winning rules as a weekly AWS Lambda function, ready to
+deploy but not running anywhere yet. The design: the forecasting job drops its predictions and, a week
+later, the actual demand into S3; the function updates the score and emails a data scientist when it
+fires, with its estimate of when the change began. By AWS list prices it would cost cents a month. I
+replayed six years (310 weeks) of Texas data through the function's code on my own machine, and it gave exactly
+the same scores, and the same first alarm (February 2022), as the offline experiment.
 
 ## What I'd tell a team
 

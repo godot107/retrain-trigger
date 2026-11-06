@@ -5,6 +5,7 @@
 
 Needs `python -m retrain.experiment` and `python -m retrain.realdata` run first (results/).
 """
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +29,222 @@ LABELS = {'never': 'never retrain', 'schedule': 'every 10 batches', 'psi': 'inpu
           'page_hinkley_cp': 'Page-Hinkley + change point', 'error_cpw': 'error ratio + weighted window',
           'page_hinkley_cpw': 'Page-Hinkley + weighted window', 'oracle': 'oracle (knows the change)'}
 """
+
+
+# --- Key terms and references -------------------------------------------------------------------
+# One definition per term, shared by all notebooks. Each term cites the sources in REFS that cover it.
+# Textbook page numbers are the printed page numbers in the book (checked in textbook-kb).
+
+TERMS = {
+    "drift": ("Drift",
+        "The data a model sees in production stops looking like the data it was trained on, so its "
+        "predictions can get worse over time. An umbrella word for the two kinds below.", ["treveil", "mcmahon", "gama"]),
+    "covariate": ("Input drift (covariate shift, data drift)",
+        "The *inputs* change (more suburban deliveries, hotter summers) but the rule linking inputs to the "
+        "right answer stays the same. Harmless if the model has already seen inputs like the new ones; "
+        "harmful if they are new territory. Terminology varies between books: McMahon uses \"covariate "
+        "drift\" for what is called concept drift below; this project follows Moreno-Torres et al.",
+        ["moreno", "quinonero", "treveil"]),
+    "concept": ("Concept drift",
+        "The *meaning* changes: the same inputs now lead to a different right answer (a new road makes the "
+        "same distance quicker). Input monitors cannot see it, because the inputs look unchanged. It can be "
+        "sudden or gradual.", ["kubat", "gama", "lu", "mcmahon"]),
+    "labels": ("Labels and label delay",
+        "A label is the true answer for a prediction (the actual delivery time, the actual demand). In "
+        "production it arrives later than the prediction; label delay is how much later. Error-based "
+        "monitors must wait for it; input monitors don't.", ["treveil", "kubat"]),
+    "trigger": ("Trigger and threshold",
+        "A rule that watches one score each batch and pages someone to retrain when the score crosses a "
+        "threshold. Lower threshold = more sensitive = more false alarms.", ["mcmahon", "ameisen"]),
+    "false_alarm": ("False-alarm rate and calibration",
+        "How often a trigger fires when nothing has changed. Here every trigger's threshold is set "
+        "(calibrated) so they all fire about once per 300 drift-free batches; otherwise a more sensitive "
+        "trigger would look better just because it fires more.", ["basseville"]),
+    "psi": ("Population Stability Index (PSI)",
+        "Splits a feature's training values into 10 equal-count bins, then measures how far the new "
+        "batch's share in each bin has moved: sum of (new - old) x ln(new / old). The industry rule of "
+        "thumb is that PSI above 0.2 means significant drift. Here the score is the worst feature's PSI.",
+        ["yurdakul"]),
+    "ks": ("Kolmogorov-Smirnov (KS) test",
+        "A classic test of whether two samples come from the same distribution: the largest vertical gap "
+        "between their cumulative distribution curves. Run per feature; the score here is -log10 of the "
+        "smallest p-value after a Bonferroni correction for testing several features.",
+        ["skiena", "massey", "treveil"]),
+    "c2st": ("Classifier two-sample test (domain classifier)",
+        "Mix old rows and new rows, and train a classifier to tell which is which. If it can't (AUC about "
+        "0.5), the data hasn't moved; if it can (AUC near 1), it has. Unlike PSI and KS, it sees changes "
+        "in the *combination* of features, not one column at a time.", ["lopezpaz", "treveil"]),
+    "auc": ("AUC",
+        "Area under the ROC curve: the chance that a classifier ranks a random \"new\" row above a random "
+        "\"old\" row. 0.5 is a coin flip, 1.0 is perfect separation.", ["skiena"]),
+    "pred_drift": ("Prediction drift",
+        "PSI applied to the model's *outputs* instead of its inputs. Needs no labels, but like input drift "
+        "it can't see a change in meaning.", ["treveil"]),
+    "error_ratio": ("Error ratio",
+        "The model's average error on the last 3 labelled batches divided by its error at training time. "
+        "1.0 means as good as on day one; 1.5 means 50% worse.", ["ameisen", "mcmahon"]),
+    "mae": ("Mean absolute error (MAE)",
+        "The average size of the miss, ignoring direction. In notebook 3 it is divided by the operator's "
+        "typical demand, so 0.05 means the forecast is off by 5% on average.", ["brownlee"]),
+    "page_hinkley": ("Page-Hinkley test",
+        "A quality-control method from the 1950s (Page's CUSUM, refined by Hinkley). It keeps a running sum "
+        "of how much each batch's error exceeds normal (minus a small allowance) and fires when that sum "
+        "has climbed far enough above its lowest point. It reacts to small, persistent rises a plain ratio "
+        "misses.", ["page", "hinkley", "basseville", "gama"]),
+    "change_point": ("Change point and change-point window",
+        "The moment the world changed. The lowest point of Page-Hinkley's running sum is an estimate of it. "
+        "A change-point window retrains only on data after that estimate, instead of a fixed number of "
+        "recent batches. The weighted window keeps a full year and counts post-change rows 4 times.",
+        ["hinkley", "basseville", "kubat"]),
+    "window": ("Sliding window",
+        "Retraining only on the most recent stretch of data (here, the last 10 labelled batches), so old "
+        "data is forgotten.", ["kubat", "brownlee"]),
+    "oracle": ("Oracle",
+        "A cheating reference rule that knows when the change began and retrains once, on post-change data "
+        "only. No real system can do this; it shows how much a perfect trigger could save.", []),
+    "cost": ("Total cost and retrain price",
+        "Total cost = summed prediction error + (number of retrains x price of one retrain). The price is "
+        "expressed in batches (or weeks) of normal error, so \"retrain = 4 weeks\" means one retrain costs as "
+        "much as four weeks of ordinary forecast misses.", []),
+    "gbt": ("Gradient-boosted trees",
+        "A model built from many small decision trees, each one fitted to fix the mistakes of those before "
+        "it. Strong on tabular data. Used here via scikit-learn's HistGradientBoostingRegressor.",
+        ["friedman", "kuhn", "guido"]),
+    "binning": ("Histogram binning",
+        "To train fast, histogram-based boosting first sorts each feature into at most 255 buckets (bins) "
+        "and only considers split points between buckets. The idea comes from LightGBM.",
+        ["ke", "jansen", "sklearn_hgb"]),
+    "hyperparams": ("Hyperparameters and random search",
+        "Hyperparameters are settings chosen before training (tree depth, learning rate, number of trees), "
+        "as opposed to the weights learned during training. Random search tries random combinations and "
+        "keeps the best on validation data; here, 12 candidates.", ["bergstra", "korner"]),
+    "refit": ("Refit, retune, warm start",
+        "Three ways to retrain. Refit: same hyperparameters, new weights from recent data. Retune: a fresh "
+        "hyperparameter search, then fit. Warm start: keep the existing trees and add more, fitted to recent "
+        "data.", ["sklearn_hgb"]),
+    "ci": ("95% interval (bootstrap)",
+        "A range that would contain the true average about 95% of the time. Computed by resampling: redraw "
+        "the 30 streams (or the 12 operators) with replacement thousands of times and take the middle 95% of "
+        "the averages.", ["efron", "wasserman"]),
+    "extrapolate": ("Extrapolation",
+        "Predicting outside the range of the training data. Tree models can't: past the largest demand they "
+        "have seen, they keep predicting roughly that largest value.", ["guido"]),
+    "walk_forward": ("Walk-forward evaluation (backtest)",
+        "Replaying history in time order: predict the next week using only what was known before it, "
+        "record the error, then move one week forward. It never lets the model peek at the future.",
+        ["brownlee"]),
+    "out_of_sample": ("Choose on one period, score on another",
+        "Thresholds are picked using 2020-21 and then judged once on 2022-25, so the score is not flattered "
+        "by tuning on the same years it is graded on.", ["brownlee"]),
+    "day_ahead": ("Day-ahead demand forecast and grid operator",
+        "Grid operators (balancing authorities such as ERCOT in Texas or PJM in the mid-Atlantic) forecast "
+        "each hour of tomorrow's electricity demand so enough power plants are scheduled. EIA-930 publishes "
+        "their hourly demand.", ["eia930"]),
+    "seasonality": ("Seasonality",
+        "A pattern that repeats on a calendar cycle: electricity demand peaks in summer afternoons and winter "
+        "mornings. A model trained on a few weeks can't learn a yearly cycle.", ["treveil", "brownlee"]),
+    "perfect_forecast": ("Perfect forecast vs archived forecast",
+        "The first weather model was given the temperature that actually happened (a perfect forecast, "
+        "optimistic). The check reran it with the day-ahead weather forecasts that were really published at "
+        "the time, from an archive.", ["openmeteo"]),
+}
+
+REFS = {
+    # Textbooks (in my textbook-kb library)
+    "treveil": "Treveil, M. et al. (2020). *Introducing MLOps*. O'Reilly. Ch. 7, \"Monitoring and Feedback Loop\": "
+               "drift causes, KS and chi-squared tests, the domain classifier, pp. 91-95.",
+    "mcmahon": "McMahon, A. P. (2023). *Machine Learning Engineering with Python*, 2nd ed. Packt. Ch. 3, "
+               "\"Retraining required\" and \"Detecting data drift\", pp. 97-102.",
+    "kubat": "Kubat, M. (2017). *An Introduction to Machine Learning*, 2nd ed. Springer. Ch. 10, \"Concept drift\" "
+             "and sliding windows over a stream (Fig. 10.3).",
+    "ameisen": "Ameisen, E. (2020). *Building Machine Learning Powered Applications*. O'Reilly. Ch. 11: retraining "
+               "when a monitored metric drops below a threshold.",
+    "skiena": "Skiena, S. (2017). *The Data Science Design Manual*. Springer. Sec. 5.3.3, \"The Kolmogorov-Smirnov "
+              "test\", pp. 139-140; Sec. 7.4, ROC curves, pp. 218-219.",
+    "wasserman": "Wasserman, L. (2004). *All of Statistics*. Springer. Ch. 8, \"The Bootstrap\" (percentile "
+                 "intervals), pp. 107-117.",
+    "kuhn": "Kuhn, M. & Johnson, K. (2013). *Applied Predictive Modeling*. Springer. Sec. 8.6, \"Boosting\", pp. 203-208.",
+    "guido": "Müller, A. C. & Guido, S. (2016). *Introduction to Machine Learning with Python*. O'Reilly. Ch. 2: "
+             "\"tree-based regression models are not able to extrapolate\" (RAM-price example), pp. 82-84.",
+    "jansen": "Jansen, S. (2018). *Hands-On Machine Learning for Algorithmic Trading*. Packt. Ch. 11, "
+              "\"Simplified split-finding algorithms\" (histogram binning), p. 330.",
+    "brownlee": "Brownlee, J. (2020). *Introduction to Time Series Forecasting with Python*. Sec. 16.5, "
+                "\"Walk Forward Validation\", pp. 151-153.",
+    "korner": "Körner, C. & Waaijer, M. *Mastering Azure Machine Learning*. Packt. Ch. 8, hyperparameter tuning: "
+              "grid vs random search.",
+    # Papers and other sources
+    "gama": "Gama, J., Žliobaitė, I., Bifet, A., Pechenizkiy, M. & Bouchachia, A. (2014). A survey on concept "
+            "drift adaptation. *ACM Computing Surveys* 46(4), 44.",
+    "lu": "Lu, J., Liu, A., Dong, F., Gu, F., Gama, J. & Zhang, G. (2019). Learning under concept drift: a review. "
+          "*IEEE Transactions on Knowledge and Data Engineering* 31(12), 2346-2363.",
+    "moreno": "Moreno-Torres, J. G., Raeder, T., Alaiz-Rodríguez, R., Chawla, N. V. & Herrera, F. (2012). A unifying "
+              "view on dataset shift in classification. *Pattern Recognition* 45(1), 521-530.",
+    "quinonero": "Quiñonero-Candela, J., Sugiyama, M., Schwaighofer, A. & Lawrence, N. D. (eds.) (2009). *Dataset "
+                 "Shift in Machine Learning*. MIT Press.",
+    "page": "Page, E. S. (1954). Continuous inspection schemes. *Biometrika* 41(1/2), 100-115.",
+    "hinkley": "Hinkley, D. V. (1971). Inference about the change-point from cumulative sum tests. *Biometrika* "
+               "58(3), 509-523.",
+    "basseville": "Basseville, M. & Nikiforov, I. V. (1993). *Detection of Abrupt Changes: Theory and "
+                  "Application*. Prentice Hall.",
+    "yurdakul": "Yurdakul, B. (2018). *Statistical Properties of Population Stability Index*. PhD dissertation, "
+                "Western Michigan University.",
+    "massey": "Massey, F. J. (1951). The Kolmogorov-Smirnov test for goodness of fit. *Journal of the American "
+              "Statistical Association* 46(253), 68-78.",
+    "lopezpaz": "Lopez-Paz, D. & Oquab, M. (2017). Revisiting classifier two-sample tests. *ICLR 2017*.",
+    "friedman": "Friedman, J. H. (2001). Greedy function approximation: a gradient boosting machine. *Annals of "
+                "Statistics* 29(5), 1189-1232.",
+    "ke": "Ke, G. et al. (2017). LightGBM: a highly efficient gradient boosting decision tree. *NeurIPS 2017*.",
+    "bergstra": "Bergstra, J. & Bengio, Y. (2012). Random search for hyper-parameter optimization. *JMLR* 13, 281-305.",
+    "efron": "Efron, B. & Tibshirani, R. J. (1993). *An Introduction to the Bootstrap*. Chapman & Hall.",
+    "sklearn_hgb": "scikit-learn documentation, `HistGradientBoostingRegressor` (the `warm_start` and `max_bins` "
+                   "parameters): https://scikit-learn.org/stable/modules/generated/"
+                   "sklearn.ensemble.HistGradientBoostingRegressor.html",
+    "eia930": "U.S. Energy Information Administration, Hourly Electric Grid Monitor (Form EIA-930): "
+              "https://www.eia.gov/electricity/gridmonitor/",
+    "openmeteo": "Open-Meteo Historical Weather API and Previous Runs API: https://open-meteo.com/",
+}
+TEXTBOOKS = ["treveil", "mcmahon", "kubat", "ameisen", "skiena", "wasserman", "kuhn", "guido", "jansen",
+             "brownlee", "korner"]
+
+
+def glossary(keys):
+    """A 'Key terms' cell: one plain-language definition per term, with the sources that cover it."""
+    rows = []
+    for k in keys:
+        name, text, refs = TERMS[k]
+        cite = f" *(See: {', '.join(_short(r) for r in refs)}.)*" if refs else ""
+        rows.append(f"- **{name}:** {text}{cite}")
+    return "## Key terms\n\nPlain-language definitions of the terms this notebook uses; the full sources are " \
+           "listed under References at the end.\n\n" + "\n".join(rows)
+
+
+def _short(r):
+    """'Treveil 2020' style tag from a reference string."""
+    fixed = {"sklearn_hgb": "scikit-learn docs", "eia930": "EIA-930", "openmeteo": "Open-Meteo"}
+    if r in fixed:
+        return fixed[r]
+    s = REFS[r]
+    year = re.search(r"\((\d{4})\)", s)
+    return s.split(",")[0] + (f" {year.group(1)}" if year else "")
+
+
+def references(keys):
+    """Reference list for the terms used, textbooks first."""
+    used = sorted({r for k in keys for r in TERMS[k][2]})
+    books = [REFS[r] for r in TEXTBOOKS if r in used]
+    other = sorted(REFS[r] for r in used if r not in TEXTBOOKS)
+    out = "## References\n\n"
+    if books:
+        out += "**Textbooks**\n\n" + "\n".join(f"- {b}" for b in books) + "\n\n"
+    out += "**Papers, documentation and data**\n\n" + "\n".join(f"- {o}" for o in other)
+    return out
+
+
+NB01_TERMS = ["drift", "covariate", "concept", "labels", "trigger", "false_alarm", "psi", "ks", "c2st", "auc",
+              "pred_drift", "error_ratio", "page_hinkley", "change_point", "window", "oracle", "cost", "gbt", "ci"]
+NB02_TERMS = ["refit", "hyperparams", "gbt", "binning", "labels", "change_point"]
+NB03_TERMS = ["day_ahead", "mae", "walk_forward", "out_of_sample", "extrapolate", "seasonality", "psi", "c2st",
+              "auc", "error_ratio", "page_hinkley", "change_point", "cost", "ci", "perfect_forecast"]
 
 
 def _nb():
@@ -61,6 +278,7 @@ exactly when and how the world changes, so we know the right answer:
 The change starts at batch 40 of 80. The model (gradient-boosted trees, tuned at the start) trains on
 batches 0-19. True answers ("labels") come back 2 batches late, as they do in real life.
 """)
+    md(glossary(NB01_TERMS))
     code(SETUP + "\nfrom retrain import simulate, detectors\nd = pd.read_csv('results/synthetic_runs.csv')\nt = d[d.study == 'triggers']")
     md("""
 ## 1 · What the drift looks like
@@ -173,6 +391,7 @@ best.rename('cheapest trigger').to_frame().T
 drift as an early, low-priority flag (and as the only signal when labels never come back); and when you
 retrain, train on data from after the change, not a fixed window.
 """)
+    md(references(NB01_TERMS))
     return c
 
 
@@ -189,6 +408,7 @@ When the trigger fires, a retrain can:
 
 Same 30 streams per scenario as notebook 1; mean prediction error after the change (lower is better).
 """)
+    md(glossary(NB02_TERMS))
     code(SETUP + "\nd = pd.read_csv('results/synthetic_runs.csv')")
     code("""
 a = d[(d.study == 'actions') | ((d.study == 'triggers') & d.trigger.isin(['error', 'oracle', 'schedule']))]
@@ -245,6 +465,7 @@ Slower labels cost more, roughly steadily, with one wrinkle: at a 5-batch delay 
 later and so trains on *more* post-change data, which can beat a 2-batch delay. The same lesson as the
 change-point window: what you retrain on matters as much as when.
 """)
+    md(references(NB02_TERMS))
     return c
 
 
@@ -265,6 +486,7 @@ simple model, which is fine for comparing *retraining rules*.
 **Honest setup:** there is no drift-free stretch to calibrate on and no known "right" retrain date. So
 each trigger's threshold is **chosen on 2020-2021** and **scored once on 2022-2025**.
 """)
+    md(glossary(NB03_TERMS))
     code(SETUP + """
 from retrain import realdata, eia, backtest
 rows = json.load(open('results/real_runs.json'))
@@ -464,6 +686,7 @@ plt.tight_layout()
 - Ideas that win in simulation (change-point windows) need checking against the real data's structure
   (here, seasonality).
 """)
+    md(references(NB03_TERMS))
     return c
 
 
